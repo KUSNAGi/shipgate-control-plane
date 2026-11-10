@@ -1,0 +1,51 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Ruff static analysis
+        run: ruff check .
+      - name: Unit and API integration tests
+        run: pytest -q --cov=shipgate --cov-report=term-missing
+      - name: Python compile check
+        run: python -m compileall -q shipgate alembic tests
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: shipgate
+          POSTGRES_PASSWORD: ci-only-not-a-real-secret
+          POSTGRES_DB: shipgate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shipgate -d shipgate"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SHIPGATE_TEST_POSTGRES_URL: postgresql+psycopg://shipgate:ci-only-not-a-real-secret@localhost:5432/shipgate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - name: PostgreSQL migrations and API integration
+        run: pytest -q tests/test_postgres.py

@@ -1,0 +1,68 @@
+name: shipgate
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shipgate
+      POSTGRES_USER: shipgate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your environment}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shipgate -d shipgate"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: &app-env
+      SHIPGATE_DATABASE_URL: ${SHIPGATE_DATABASE_URL:?Set database URL with password}
+      SHIPGATE_ENVIRONMENT: ${SHIPGATE_ENVIRONMENT:-development}
+      SHIPGATE_TRUSTED_HOSTS: ${SHIPGATE_TRUSTED_HOSTS:-["localhost","127.0.0.1","testserver"]}
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - backend
+
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',8000),2); s.close()"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+    networks:
+      - backend
+volumes:
+  pgdata:
+networks:
+  backend:

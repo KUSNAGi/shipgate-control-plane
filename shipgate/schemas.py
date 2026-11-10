@@ -1,0 +1,117 @@
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+SLUG = r"^[a-z][a-z0-9-]{1,62}[a-z0-9]$"
+SHA256 = r"^[a-f0-9]{64}$"
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProjectCreate(StrictModel):
+    slug: str = Field(pattern=SLUG)
+    description: str = Field(default="", max_length=500)
+
+
+class ProjectOut(StrictModel):
+    id: str
+    slug: str
+    description: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class KeyCreate(StrictModel):
+    label: str = Field(min_length=2, max_length=100)
+    role: Literal["admin", "operator", "approver", "auditor"]
+
+
+class KeyCreated(StrictModel):
+    id: str
+    label: str
+    role: str
+    key: str
+
+
+class KeyOut(StrictModel):
+    id: str
+    label: str
+    role: str
+    prefix: str
+    revoked: bool
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ReleaseCreate(StrictModel):
+    project_id: str = Field(min_length=32, max_length=32)
+    environment: Literal["dev", "staging", "production"]
+    artifact_sha256: str = Field(pattern=SHA256)
+    risk: Literal["low", "medium", "high"]
+    description: str = Field(min_length=12, max_length=2000)
+
+
+class VersionedAction(StrictModel):
+    expected_version: int = Field(ge=1)
+
+
+class ReviewAction(VersionedAction):
+    decision: Literal["approve", "reject"]
+    note: str = Field(default="", max_length=500)
+
+
+class CompleteAction(VersionedAction):
+    observed_artifact_sha256: str = Field(pattern=SHA256)
+    evidence_url: str = Field(min_length=15, max_length=500)
+
+    @field_validator("evidence_url")
+    @classmethod
+    def validate_evidence(cls, value: str) -> str:
+        if not value.startswith("https://") or any(c in value for c in "\n\r\t "):
+            raise ValueError("evidence_url must be an HTTPS URL without whitespace")
+        return value
+
+
+class ReleaseOut(StrictModel):
+    id: str
+    project_id: str
+    environment: str
+    artifact_sha256: str
+    risk: str
+    description: str
+    status: str
+    version: int
+    required_approvals: int
+    approval_count: int
+    created_by: str
+    completion_evidence: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AuditOut(StrictModel):
+    sequence: int
+    action: str
+    subject_id: str
+    actor_key_id: str | None
+    payload: dict
+    previous_hash: str
+    hash: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditVerification(StrictModel):
+    valid: bool
+    event_count: int
+    last_hash: str
+
+
+class Page(StrictModel):
+    # Intentionally offset-based for small read-bound administrative datasets.
+    items: list
+    limit: int
+    offset: int
