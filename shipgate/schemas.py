@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -77,8 +78,22 @@ class CompleteAction(VersionedAction):
     @field_validator("evidence_url")
     @classmethod
     def validate_evidence(cls, value: str) -> str:
-        if not value.startswith("https://") or any(c in value for c in "\n\r\t "):
-            raise ValueError("evidence_url must be an HTTPS URL without whitespace")
+        # URLs enter the durable audit log: reject ambiguous or credential-bearing input.
+        if any(c.isspace() or ord(c) < 33 or c == "\\" for c in value):
+            raise ValueError("evidence_url must be an HTTPS URL without whitespace or backslashes")
+        try:
+            parsed = urlsplit(value)
+            valid = (
+                value.startswith("https://")
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.port != 0
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError("evidence_url requires a valid HTTPS host and no URL credentials")
         return value
 
 
