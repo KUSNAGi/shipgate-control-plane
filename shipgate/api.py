@@ -16,11 +16,11 @@ from shipgate.config import Settings, get_settings
 from shipgate.db import make_factory
 from shipgate.models import ApiKey, AuditEvent, Project, Release
 from shipgate.schemas import (
-    AuditOut, AuditVerification, CompleteAction, KeyCreate, KeyCreated, KeyOut,
+    AuditOut, AuditVerification, CompleteAction, KeyCreate, KeyCreated, KeyOut, KeyRotate,
     ProjectCreate, ProjectOut, ReleaseCreate, ReleaseOut, ReviewAction,
     VersionedAction,
 )
-from shipgate.security import authenticate, new_api_key, require_role
+from shipgate.security import authenticate, expires_after, new_api_key, require_role
 from shipgate.service import (
     cancel_release, complete_release, create_release, present_release,
     review_release, select_release, submit_release,
@@ -41,7 +41,7 @@ def create_app(factory: sessionmaker | None = None, settings: Settings | None = 
         yield
 
     app = FastAPI(
-        title="ShipGate Control Plane", version="0.1.0", lifespan=lifespan,
+        title="ShipGate Control Plane", version="0.2.0", lifespan=lifespan,
         description="An independent release approval and evidence recording service.",
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url=None,
@@ -114,16 +114,18 @@ def create_app(factory: sessionmaker | None = None, settings: Settings | None = 
         secret, prefix, digest = new_api_key()
         record = ApiKey(
             tenant_id=actor.tenant_id, prefix=prefix, secret_hash=digest,
-            role=body.role, label=body.label,
+            role=body.role, label=body.label, expires_at=expires_after(body.ttl_hours),
         )
         db.add(record)
         db.flush()
         append_audit(
             db, tenant_id=actor.tenant_id, actor_key_id=actor.id,
             action="key.created", subject_id=record.id,
-            payload={"label": body.label, "role": body.role},
+            payload={"label": body.label, "role": body.role,
+                     "expires_at": record.expires_at.isoformat()},
         )
-        return KeyCreated(id=record.id, label=body.label, role=body.role, key=secret)
+        return KeyCreated(id=record.id, label=body.label, role=body.role,
+                          key=secret, expires_at=record.expires_at)
 
     @app.get("/v1/keys", response_model=list[KeyOut], tags=["Auth"])
     def list_keys(actor: Principal, db: Db):
@@ -150,6 +152,36 @@ def create_app(factory: sessionmaker | None = None, settings: Settings | None = 
         )
         db.flush()
         return key
+
+    @app.post("/v1/keys/{key_id}/rotate", status_code=201,
+              response_model=KeyCreated, tags=["Auth"])
+    def rotate_key(key_id: str, body: KeyRotate, actor: Principal, db: Db):
+        require_role(actor, "admin")
+        old = db.scalar(select(ApiKey).where(
+            ApiKey.id == key_id, ApiKey.tenant_id == actor.tenant_id,
+        ).with_for_update())
+        if old is None:
+            raise HTTPException(status_code=404, detail="key not found")
+        if old.revoked:
+            raise HTTPException(status_code=409, detail="key already revoked")
+        secret, prefix, digest = new_api_key()
+        expiry = expires_after(body.ttl_hours)
+        replacement = ApiKey(
+            tenant_id=old.tenant_id, label=old.label, role=old.role,
+            prefix=prefix, secret_hash=digest, expires_at=expiry,
+        )
+        db.add(replacement)
+        db.flush()
+        old.revoked = True
+        append_audit(
+            db, tenant_id=actor.tenant_id, actor_key_id=actor.id,
+            action="key.rotated", subject_id=replacement.id,
+            payload={"old_key_id": old.id, "role": old.role,
+                     "expires_at": expiry.isoformat()},
+        )
+        db.flush()
+        return KeyCreated(id=replacement.id, label=replacement.label,
+                          role=replacement.role, key=secret, expires_at=expiry)
 
     @app.post("/v1/projects", status_code=201, response_model=ProjectOut, tags=["Projects"])
     def make_project(body: ProjectCreate, actor: Principal, db: Db):

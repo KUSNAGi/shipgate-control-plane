@@ -8,6 +8,8 @@ features already delivered.
 - OpenID Connect device/browser sign-in with organization membership and MFA claim checks.
 - Bind approvals to independent human subjects rather than API credential IDs.
 - Permission scopes by environment/project and separation-of-duties policy tests.
+- v0.2 delivers expiring API keys and atomic administrative rotation; service keys are still
+  not proof of distinct human identity.
 
 ## P1: Verified deployment evidence
 

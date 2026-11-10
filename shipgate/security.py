@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -9,6 +10,10 @@ from sqlalchemy.orm import Session
 from shipgate.models import ApiKey
 
 VALID_ROLES = frozenset({"admin", "operator", "approver", "auditor"})
+
+
+def expires_after(hours: int) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(hours=hours)
 
 
 def new_api_key() -> tuple[str, str, str]:
@@ -27,6 +32,13 @@ def authenticate(session: Session, value: str | None) -> ApiKey:
     candidate_hash = hashlib.sha256(parts[2].encode()).hexdigest()
     if not key or not hmac.compare_digest(candidate_hash, key.secret_hash):
         raise HTTPException(status_code=401, detail="invalid API key")
+    if key.expires_at is not None:
+        expiration = key.expires_at
+        # SQLite returns naive datetimes despite timezone=True; PostgreSQL preserves UTC offset.
+        if expiration.tzinfo is None:
+            expiration = expiration.replace(tzinfo=timezone.utc)
+        if expiration <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="invalid API key")
     return key
 
 
