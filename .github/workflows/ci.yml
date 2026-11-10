@@ -49,3 +49,34 @@ jobs:
       - run: python -m pip install -e '.[dev]'
       - name: PostgreSQL migrations and API integration
         run: pytest -q tests/test_postgres.py
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      POSTGRES_PASSWORD: ci-only-compose-password
+      SHIPGATE_DATABASE_URL: postgresql+psycopg://shipgate:ci-only-compose-password@db:5432/shipgate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose config -q
+      - name: Build and boot the full stack
+        run: docker compose up --build -d
+      - name: Verify PostgreSQL migrations and API readiness
+        shell: bash
+        run: |
+          ready=0
+          for attempt in {1..40}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health/ready | grep -q '"status":"ready"'; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+      - name: Capture diagnostic container status
+        if: failure()
+        run: docker compose ps -a
+      - name: Tear down containers and volumes
+        if: always()
+        run: docker compose down --volumes --remove-orphans

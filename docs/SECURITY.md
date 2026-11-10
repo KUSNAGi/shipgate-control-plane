@@ -4,6 +4,8 @@
 
 - API access requires random 36-byte URL-safe secrets, keyed by an indexed random prefix.
   Each secret is stored as SHA-256 only. Constant-time digest comparison is used.
+- New keys default to 720-hour expiry (configurable 1–2160 hours), and admin rotation
+  atomically revokes the old key. Legacy keys stay unexpired until rotated.
 - Roles: admins create projects/keys, operators propose & submit releases, approvers
   review, auditors inspect the audit chain. Authors cannot review their own releases.
 - All mutable resources have tenant-constrained queries; composite database keys enforce

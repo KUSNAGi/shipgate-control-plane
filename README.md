@@ -6,7 +6,7 @@ ShipGate solves a common operational gap: a deployment can have a passing CI job
 traceable authorization, separation of duties, the exact approved artifact digest, or evidence
 of what happened afterward. It manages **release decisions**, not the actual deployment.
 
-**Status:** functional v0.1 reference implementation. Automated integration tests pass on
+**Status:** functional v0.2 reference implementation. Automated integration tests pass on
 SQLite. PostgreSQL migrations and integration coverage are included in CI but were not run in
 the original offline development environment. It has **not** been deployed to a production
 cluster, penetration tested, or load tested; do not mistake code completeness for operational
@@ -17,7 +17,8 @@ qualification. See [security](docs/SECURITY.md) and [release checklist](docs/OPE
 - **Multi-tenant isolation:** all project, release, key, and audit API queries are scoped to
   the authenticated tenant; composite foreign keys reinforce boundary consistency.
 - **Least-privilege API keys:** one-time plaintext token issuance, SHA-256 secret digests,
-  revocation, and `admin`, `operator`, `approver`, and `auditor` roles.
+  configurable 1–2160 hour expiry, transactional rotation and revocation, and
+  `admin`, `operator`, `approver`, and `auditor` roles.
 - **Release policies:** production requires one reviewer (two for high risk), high-risk
   staging requires one, and low/medium-risk staging and development can auto-approve.
 - **Separation of duties:** the author of a change cannot review it; a reviewer cannot vote
@@ -129,6 +130,15 @@ python -m compileall -q shipgate alembic tests
 
 `tests/test_postgres.py` uses `SHIPGATE_TEST_POSTGRES_URL` and is skipped when a PostgreSQL
 instance is unavailable. The CI pipeline provides PostgreSQL and runs this test.
+
+## v0.2 key lifecycle
+
+Newly issued API keys expire after 720 hours by default. Supply `ttl_hours` (1–2160)
+to `POST /v1/keys`. To rotate a key atomically, send `POST /v1/keys/{key_id}/rotate`
+with `{ "ttl_hours": 720 }` as an admin. The old key is revoked at commit, while the
+replacement plaintext secret is shown exactly once. Audit events never contain secrets.
+The nullable Alembic migration preserves older keys until their operator-initiated rotation.
+See [ADR-0002](docs/ADR_0002_KEY_LIFECYCLE.md).
 
 ## Next product milestones
 

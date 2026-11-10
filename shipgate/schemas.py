@@ -27,6 +27,11 @@ class ProjectOut(StrictModel):
 class KeyCreate(StrictModel):
     label: str = Field(min_length=2, max_length=100)
     role: Literal["admin", "operator", "approver", "auditor"]
+    ttl_hours: int = Field(default=720, ge=1, le=2160)
+
+
+class KeyRotate(StrictModel):
+    ttl_hours: int = Field(default=720, ge=1, le=2160)
 
 
 class KeyCreated(StrictModel):
@@ -34,6 +39,7 @@ class KeyCreated(StrictModel):
     label: str
     role: str
     key: str
+    expires_at: datetime
 
 
 class KeyOut(StrictModel):
@@ -42,6 +48,7 @@ class KeyOut(StrictModel):
     role: str
     prefix: str
     revoked: bool
+    expires_at: datetime | None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
