@@ -104,8 +104,16 @@ def test_idempotency_replay_and_payload_conflict(identities):
     client = e["client"]
     p = project(e)
     first = release(e, p, idem="repeat-me-001")
-    replay = release(e, p, idem="repeat-me-001")
-    assert first["id"] == replay["id"]
+    replay = client.post(
+        "/v1/releases", headers={**auth(e["operator"]), "Idempotency-Key": "repeat-me-001"},
+        json={"project_id": p, "environment": "production", "risk": "high",
+              "artifact_sha256": "a" * 64,
+              "description": "Deploy build with security and reliability improvements"},
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.headers["Idempotency-Replayed"] == "true"
+    assert first["id"] == replay.json()["id"]
+    assert first["version"] == replay.json()["version"]
     assert len(client.get("/v1/releases", headers=auth(e["operator"])).json()) == 1
     changed = client.post(
         "/v1/releases", headers={**auth(e["operator"]), "Idempotency-Key": "repeat-me-001"},
@@ -115,6 +123,15 @@ def test_idempotency_replay_and_payload_conflict(identities):
     assert changed.status_code == 409
     events = client.get("/v1/audit/events", headers=auth(e["admin"])).json()
     assert len([x for x in events if x["action"] == "release.created"]) == 1
+    fresh = client.post(
+        "/v1/releases", headers={**auth(e["operator"]), "Idempotency-Key": "fresh-key-002"},
+        json={"project_id": p, "environment": "staging", "risk": "low",
+              "artifact_sha256": "b" * 64,
+              "description": "Separate deployment with a new request key"},
+    )
+    assert fresh.status_code == 201, fresh.text
+    assert fresh.headers["Idempotency-Replayed"] == "false"
+    assert fresh.json()["id"] != first["id"]
 
 
 def test_conflicts_and_rejection(identities):

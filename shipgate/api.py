@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -212,12 +212,19 @@ def create_app(factory: sessionmaker | None = None, settings: Settings | None = 
             Project.tenant_id == actor.tenant_id,
         ).order_by(Project.slug).limit(100)).all()
 
-    @app.post("/v1/releases", status_code=201, response_model=ReleaseOut, tags=["Releases"])
-    def make_release(body: ReleaseCreate, actor: Principal, db: Db,
+    @app.post(
+        "/v1/releases", status_code=201, response_model=ReleaseOut, tags=["Releases"],
+        responses={200: {"model": ReleaseOut, "description": "Existing idempotent release replay"}},
+    )
+    def make_release(body: ReleaseCreate, actor: Principal, db: Db, response: Response,
                      idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
         if idempotency_key is None:
             raise HTTPException(status_code=422, detail="Idempotency-Key is required")
-        release, _replayed = create_release(db, actor, body, idempotency_key)
+        release, replayed = create_release(db, actor, body, idempotency_key)
+        if replayed:
+            # A successful retry must not appear to have created a second resource.
+            response.status_code = 200
+        response.headers["Idempotency-Replayed"] = "true" if replayed else "false"
         return present_release(db, release)
 
     @app.get("/v1/releases", response_model=list[ReleaseOut], tags=["Releases"])

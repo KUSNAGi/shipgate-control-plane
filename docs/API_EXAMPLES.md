@@ -41,3 +41,19 @@ curl -fsS "$BASE/v1/audit/verify" -H "X-API-Key: $API_KEY"
 
 The example `ci.example.org` address is illustrative, **not** evidence of a real deployment.
 Do not record a completed release until the external deployment has genuinely happened.
+
+## Idempotent release creation responses
+
+`POST /v1/releases` uses the request's `Idempotency-Key` header to avoid creating
+multiple releases on retried requests. The response distinguishes the outcomes:
+
+| Outcome | HTTP status | `Idempotency-Replayed` |
+| --- | --- | --- |
+| Newly created release | `201 Created` | `false` |
+| Same key, actor, and payload replay | `200 OK` | `true` |
+| Same key reused with a different payload | `409 Conflict` | Not set |
+
+A successful replay returns the **current** state of the existing release; it does
+not repeat the original transition or append another `release.created` audit event.
+Clients should use the returned resource ID and version rather than assuming the
+release is still in draft state. Keys are scoped to the authenticated actor and tenant.
