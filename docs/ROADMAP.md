@@ -37,3 +37,13 @@ features already delivered.
 
 Each feature should ship with tests, an ADR, documented migration impact and a
 representative integration scenario; no mock status should be described as production-ready.
+
+## v0.3 delivered (2026-11-14)
+
+- [x] Tenant-scoped project/environment/risk approval policy overrides.
+- [x] Floor enforcement prevents reduced scrutiny for production deployments.
+- [x] Optimistic policy version check with serialized PostgreSQL parent lock.
+- [x] Immutable release policy provenance (source + version + approval quorum).
+- [x] Policy mutations in the per-tenant audit hash chain.
+- [x] SQLite unit/API coverage and PostgreSQL migration integration test definition.
+- [ ] Validate the PostgreSQL test against an actual server (blocked on runner/billing).

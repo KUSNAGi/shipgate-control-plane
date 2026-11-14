@@ -17,10 +17,11 @@ from shipgate.db import make_factory
 from shipgate.models import ApiKey, AuditEvent, Project, Release
 from shipgate.schemas import (
     AuditOut, AuditVerification, CompleteAction, KeyCreate, KeyCreated, KeyOut, KeyRotate,
-    ProjectCreate, ProjectOut, ReleaseCreate, ReleaseOut, ReviewAction,
+    ProjectCreate, ProjectOut, PolicyUpdate, PolicyOut, ReleaseCreate, ReleaseOut, ReviewAction,
     VersionedAction,
 )
 from shipgate.security import authenticate, expires_after, new_api_key, require_role
+from shipgate.policy import (ENVIRONMENTS, RISKS, find_project, resolve_policy, update_policy)
 from shipgate.service import (
     cancel_release, complete_release, create_release, present_release,
     review_release, select_release, submit_release,
@@ -41,7 +42,7 @@ def create_app(factory: sessionmaker | None = None, settings: Settings | None = 
         yield
 
     app = FastAPI(
-        title="ShipGate Control Plane", version="0.2.0", lifespan=lifespan,
+        title="ShipGate Control Plane", version="0.3.0", lifespan=lifespan,
         description="An independent release approval and evidence recording service.",
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url=None,
@@ -211,6 +212,32 @@ def create_app(factory: sessionmaker | None = None, settings: Settings | None = 
         return db.scalars(select(Project).where(
             Project.tenant_id == actor.tenant_id,
         ).order_by(Project.slug).limit(100)).all()
+
+    @app.get("/v1/projects/{project_id}/policies", response_model=list[PolicyOut],
+             tags=["Policies"])
+    def list_policies(project_id: str, actor: Principal, db: Db):
+        find_project(db, actor, project_id)
+        return [resolve_policy(db, actor, project_id, environment, risk)
+                for environment in ENVIRONMENTS for risk in RISKS]
+
+    @app.get("/v1/projects/{project_id}/policies/{environment}/{risk}",
+             response_model=PolicyOut, tags=["Policies"])
+    def policy_preview(project_id: str, environment: str, risk: str,
+                       actor: Principal, db: Db):
+        if environment not in ENVIRONMENTS or risk not in RISKS:
+            raise HTTPException(422, "invalid environment or risk")
+        find_project(db, actor, project_id)
+        return resolve_policy(db, actor, project_id, environment, risk)
+
+    @app.put("/v1/projects/{project_id}/policies/{environment}/{risk}",
+             response_model=PolicyOut, tags=["Policies"])
+    def set_policy(project_id: str, environment: str, risk: str,
+                   body: PolicyUpdate, actor: Principal, db: Db):
+        require_role(actor, "admin")
+        if environment not in ENVIRONMENTS or risk not in RISKS:
+            raise HTTPException(422, "invalid environment or risk")
+        return update_policy(db, actor, project_id, environment, risk,
+                             body.min_approvals, body.expected_version)
 
     @app.post(
         "/v1/releases", status_code=201, response_model=ReleaseOut, tags=["Releases"],

@@ -107,6 +107,8 @@ class ReleaseOut(StrictModel):
     status: str
     version: int
     required_approvals: int
+    policy_source: str
+    policy_version: int | None
     approval_count: int
     created_by: str
     completion_evidence: str | None
@@ -137,3 +139,18 @@ class Page(StrictModel):
     items: list
     limit: int
     offset: int
+
+
+class PolicyUpdate(StrictModel):
+    min_approvals: int = Field(ge=0, le=5)
+    expected_version: int = Field(ge=0)
+
+
+class PolicyOut(StrictModel):
+    project_id: str
+    environment: Literal["dev", "staging", "production"]
+    risk: Literal["low", "medium", "high"]
+    baseline_approvals: int
+    required_approvals: int
+    source: Literal["baseline", "project"]
+    version: int

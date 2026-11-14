@@ -65,6 +65,29 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class ProjectPolicy(Base):
+    """Optional per-project stricter quorum with optimistic versioning."""
+
+    __tablename__ = "project_policies"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["project_id", "tenant_id"], ["projects.id", "projects.tenant_id"],
+            name="fk_project_policy_project_tenant", ondelete="RESTRICT",
+        ),
+        UniqueConstraint("tenant_id", "project_id", "environment", "risk",
+                         name="uq_project_policy_scope"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"))
+    project_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    environment: Mapped[str] = mapped_column(String(20), nullable=False)
+    risk: Mapped[str] = mapped_column(String(10), nullable=False)
+    min_approvals: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class Release(Base):
     __tablename__ = "releases"
     __table_args__ = (
@@ -91,6 +114,8 @@ class Release(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     required_approvals: Mapped[int] = mapped_column(Integer, nullable=False)
+    policy_source: Mapped[str] = mapped_column(String(20), nullable=False, default="baseline")
+    policy_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_evidence: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
