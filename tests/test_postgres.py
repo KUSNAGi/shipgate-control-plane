@@ -47,6 +47,25 @@ def test_migrations_and_release_on_real_postgres(monkeypatch):
             json={"slug": "release-check", "description": "CI workflow"},
         )
         assert response.status_code == 201, response.text
+        # Exercise the schema migration, policy mutation, and release snapshot on PostgreSQL.
+        project_id = response.json()["id"]
+        policy = client.put(
+            f"/v1/projects/{project_id}/policies/production/high",
+            headers={"X-API-Key": raw},
+            json={"min_approvals": 3, "expected_version": 0},
+        )
+        assert policy.status_code == 200, policy.text
+        assert policy.json()["required_approvals"] == 3
+        release_response = client.post(
+            "/v1/releases",
+            headers={"X-API-Key": raw, "Idempotency-Key": "pg-policy-smoke-0001"},
+            json={"project_id": project_id, "environment": "production",
+                  "risk": "high", "artifact_sha256": "a" * 64,
+                  "description": "PG policy snapshot integration test release"},
+        )
+        assert release_response.status_code == 201, release_response.text
+        assert release_response.json()["policy_version"] == 1
+        assert release_response.json()["required_approvals"] == 3
         response = client.get("/v1/audit/verify", headers={"X-API-Key": raw})
         assert response.json()["valid"] is True
     engine.dispose()

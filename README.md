@@ -6,7 +6,7 @@ ShipGate solves a common operational gap: a deployment can have a passing CI job
 traceable authorization, separation of duties, the exact approved artifact digest, or evidence
 of what happened afterward. It manages **release decisions**, not the actual deployment.
 
-**Status:** functional v0.2 reference implementation. Automated integration tests pass on
+**Status:** functional v0.3 reference implementation. Automated integration tests pass on
 SQLite. PostgreSQL migrations and integration coverage are included in CI but were not run in
 the original offline development environment. It has **not** been deployed to a production
 cluster, penetration tested, or load tested; do not mistake code completeness for operational
@@ -19,8 +19,9 @@ qualification. See [security](docs/SECURITY.md) and [release checklist](docs/OPE
 - **Least-privilege API keys:** one-time plaintext token issuance, SHA-256 secret digests,
   configurable 1–2160 hour expiry, transactional rotation and revocation, and
   `admin`, `operator`, `approver`, and `auditor` roles.
-- **Release policies:** production requires one reviewer (two for high risk), high-risk
-  staging requires one, and low/medium-risk staging and development can auto-approve.
+- **Versioned project policies:** baseline release safety floors plus tenant-isolated,
+  admin-managed per-environment/risk approval quorums (0–5). Optimistic concurrency
+  prevents lost updates, and each release snapshots the effective policy and version.
 - **Separation of duties:** the author of a change cannot review it; a reviewer cannot vote
   twice; administrators can revoke compromised keys.
 - **Optimistic concurrency:** every release mutation requires an `expected_version`.
@@ -140,12 +141,37 @@ replacement plaintext secret is shown exactly once. Audit events never contain s
 The nullable Alembic migration preserves older keys until their operator-initiated rotation.
 See [ADR-0002](docs/ADR_0002_KEY_LIFECYCLE.md).
 
+## v0.3 project-level approval policies
+
+Administrators can tighten approval quorum for a given project, environment, and risk
+without weakening non-negotiable platform floors. Existing releases **retain** their
+original required approval threshold and policy version. This gives auditors stable
+evidence of the decision rules used when a release was created.
+
+```bash
+# Review all nine combinations; read-only access permitted for project members.
+curl -H "X-API-Key: $API_KEY" \
+  http://127.0.0.1:8000/v1/projects/$PROJECT_ID/policies
+
+# As an admin, require three distinct approvals for high-risk production.
+curl -X PUT \
+  "http://127.0.0.1:8000/v1/projects/$PROJECT_ID/policies/production/high" \
+  -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"min_approvals":3,"expected_version":0}'
+```
+
+The first override uses `expected_version: 0` and creates version 1. Subsequent updates
+pass the current version; stale writes return HTTP 409. Values below the platform floor
+return HTTP 422, writes from non-admin roles return HTTP 403, and cross-tenant projects
+return HTTP 404. Updates appear in the tenant's tamper-detection audit chain.
+See [ADR-0003](docs/ADR_0003_VERSIONED_PROJECT_POLICIES.md), the [interview walkthrough](docs/INTERVIEW_DEMO.md), and the [changelog](CHANGELOG.md).
+
 ## Next product milestones
 
 This is an **actively extensible** product, with concrete work in [ROADMAP](docs/ROADMAP.md):
 OIDC / SSO for human approvals, GitHub Actions artifact evidence validation, GitOps adapters,
 policy-as-code with signed rule versions, webhook notifications, rate limiting and an operator
-UI. These are **not** implemented in v0.1.
+UI. These are **not** implemented in v0.3.
 
 ## Ownership and distribution
 

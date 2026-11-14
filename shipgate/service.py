@@ -12,6 +12,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from shipgate.audit import append_audit
+from shipgate.policy import resolve_policy
 from shipgate.models import (
     ApiKey, Approval, IdempotencyRecord, Project, Release, now_utc,
 )
@@ -21,12 +22,6 @@ from shipgate.security import require_role
 
 def fail(code: int, detail: str) -> None:
     raise HTTPException(status_code=code, detail=detail)
-
-
-def required_approvals(environment: str, risk: str) -> int:
-    if environment == "production":
-        return 2 if risk == "high" else 1
-    return 1 if environment == "staging" and risk == "high" else 0
 
 
 def select_release(session: Session, actor: ApiKey, release_id: str, *, lock: bool = False) -> Release:
@@ -49,7 +44,9 @@ def present_release(session: Session, release: Release) -> ReleaseOut:
         id=release.id, project_id=release.project_id, environment=release.environment,
         artifact_sha256=release.artifact_sha256, risk=release.risk,
         description=release.description, status=release.status, version=release.version,
-        required_approvals=release.required_approvals, approval_count=count or 0,
+        required_approvals=release.required_approvals,
+        policy_source=release.policy_source, policy_version=release.policy_version,
+        approval_count=count or 0,
         created_by=release.created_by, completion_evidence=release.completion_evidence,
         created_at=release.created_at, updated_at=release.updated_at,
     )
@@ -87,16 +84,19 @@ def create_release(session: Session, actor: ApiKey, body: ReleaseCreate,
             fail(409, "idempotency key reused with a different request")
         return select_release(session, actor, record.release_id), True
 
+    # Serialize creation against project-policy writes on PostgreSQL.
     project = session.scalar(select(Project).where(
         Project.id == body.project_id, Project.tenant_id == actor.tenant_id,
-    ))
+    ).with_for_update())
     if project is None:
         fail(404, "project not found")
+    policy = resolve_policy(session, actor, project.id, body.environment, body.risk)
     release = Release(
         tenant_id=actor.tenant_id, project_id=project.id, created_by=actor.id,
         environment=body.environment, artifact_sha256=body.artifact_sha256,
         risk=body.risk, description=body.description,
-        required_approvals=required_approvals(body.environment, body.risk),
+        required_approvals=policy.required_approvals,
+        policy_source=policy.source, policy_version=policy.version or None,
         status="draft", version=1,
     )
     session.add(release)
@@ -109,7 +109,9 @@ def create_release(session: Session, actor: ApiKey, body: ReleaseCreate,
         session, tenant_id=actor.tenant_id, actor_key_id=actor.id,
         action="release.created", subject_id=release.id,
         payload={"project_id": project.id, "environment": body.environment,
-                 "artifact_sha256": body.artifact_sha256, "risk": body.risk},
+                 "artifact_sha256": body.artifact_sha256, "risk": body.risk,
+                 "required_approvals": policy.required_approvals,
+                 "policy_source": policy.source, "policy_version": policy.version},
     )
     session.flush()
     return release, False
